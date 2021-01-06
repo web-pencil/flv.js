@@ -109,6 +109,11 @@ declare namespace FlvJs {
         statisticsInfoReportInterval?: number;
 
         /**
+         * @defaultvalue 4000
+         */
+        checkPlayInterval?: number;
+        
+        /**
          * @desc Fill silent audio frames to avoid a/v unsync when detect large audio timestamp gap.
          * @defaultvalue true
          */

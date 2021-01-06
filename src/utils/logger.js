@@ -133,7 +133,7 @@ Log.ENABLE_WARN = true;
 Log.ENABLE_DEBUG = true;
 Log.ENABLE_VERBOSE = true;
 
-Log.ENABLE_CALLBACK = false;
+Log.ENABLE_CALLBACK = true;
 
 Log.emitter = new EventEmitter();
 

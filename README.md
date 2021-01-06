@@ -32,6 +32,8 @@ flv.js is written in [ECMAScript 6][], transpiled into ECMAScript 5 by [Babel Co
 npm install --save flv.js
 ```
 
+## 此项目gulp版本是4以下版本，使用时 node 版本得是10.X版本，否则报错
+
 ## Build
 ```bash
 npm install          # install dev-dependences

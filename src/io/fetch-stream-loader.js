@@ -94,6 +94,11 @@ class FetchStreamLoader extends BaseLoader {
             referrerPolicy: 'no-referrer-when-downgrade'
         };
 
+        if (self.AbortController) {
+            this._fetchController = new self.AbortController();
+            params.signal = this._fetchController.signal;
+        }
+
         // add additional headers
         if (typeof this._config.headers === 'object') {
             for (let key in this._config.headers) {
@@ -152,6 +157,9 @@ class FetchStreamLoader extends BaseLoader {
                 }
             }
         }).catch((e) => {
+            if (e.name === 'AbortError') {
+                return;
+            }
             this._status = LoaderStatus.kError;
             if (this._onError) {
                 this._onError(LoaderErrors.EXCEPTION, {code: -1, msg: e.message});
@@ -163,6 +171,10 @@ class FetchStreamLoader extends BaseLoader {
 
     abort() {
         this._requestAbort = true;
+        if (this._fetchController && !this._fetchController.signal.aborted) {
+            this._fetchController.abort();
+            this._fetchController = null;
+        }
     }
 
     _pump(reader) {  // ReadableStreamReader
@@ -210,6 +222,11 @@ class FetchStreamLoader extends BaseLoader {
                 // Workaround: Edge may throw InvalidStateError after ReadableStreamReader.cancel() call
                 // Ignore the unknown exception.
                 // Related issue: https://developer.microsoft.com/en-us/microsoft-edge/platform/issues/11265202/
+                return;
+            }
+
+            if (e.name === 'AbortError') {
+                // ignore initiative abort
                 return;
             }
 

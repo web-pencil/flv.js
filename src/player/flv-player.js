@@ -53,7 +53,8 @@ class FlvPlayer {
             onvSeeking: this._onvSeeking.bind(this),
             onvCanPlay: this._onvCanPlay.bind(this),
             onvStalled: this._onvStalled.bind(this),
-            onvProgress: this._onvProgress.bind(this)
+            onvProgress: this._onvProgress.bind(this),
+            onvError: this._onvError.bind(this)
         };
 
         if (self.performance && self.performance.now) {
@@ -135,6 +136,7 @@ class FlvPlayer {
         mediaElement.addEventListener('canplay', this.e.onvCanPlay);
         mediaElement.addEventListener('stalled', this.e.onvStalled);
         mediaElement.addEventListener('progress', this.e.onvProgress);
+        mediaElement.addEventListener('error', this.e.onvError);
 
         this._msectl = new MSEController(this._config);
 
@@ -176,6 +178,7 @@ class FlvPlayer {
             this._mediaElement.removeEventListener('canplay', this.e.onvCanPlay);
             this._mediaElement.removeEventListener('stalled', this.e.onvStalled);
             this._mediaElement.removeEventListener('progress', this.e.onvProgress);
+            this._mediaElement.removeEventListener('error', this.e.onvError);
             this._mediaElement = null;
         }
         if (this._msectl) {
@@ -349,14 +352,19 @@ class FlvPlayer {
         let hasQualityInfo = true;
         let decoded = 0;
         let dropped = 0;
+        let corrupted = 0;
 
         if (this._mediaElement.getVideoPlaybackQuality) {
             let quality = this._mediaElement.getVideoPlaybackQuality();
             decoded = quality.totalVideoFrames;
             dropped = quality.droppedVideoFrames;
+            corrupted = quality.corruptedVideoFrames;
         } else if (this._mediaElement.webkitDecodedFrameCount != undefined) {
             decoded = this._mediaElement.webkitDecodedFrameCount;
             dropped = this._mediaElement.webkitDroppedFrameCount;
+        } else if (this._mediaElement.mozDecodedFrames != undefined) {
+            decoded = this._mediaElement.mozDecodedFrames;
+            dropped = this._mediaElement.mozDecodedFrames - this._mediaElement.mozPaintedFrames;
         } else {
             hasQualityInfo = false;
         }
@@ -364,8 +372,21 @@ class FlvPlayer {
         if (hasQualityInfo) {
             statInfo.decodedFrames = decoded;
             statInfo.droppedFrames = dropped;
+            statInfo.corruptedFrames = corrupted;
         }
 
+        let currentTime = this._mediaElement.currentTime;
+        let sb = this._mediaElement.buffered;     
+
+        if (currentTime) {
+            statInfo.current = currentTime;
+        }
+        if (sb && sb.length > 0) {
+            statInfo.sbStart = sb.start(0);
+            statInfo.sbEnd = sb.end(sb.length - 1);
+        }
+
+        statInfo.fixes = this._msectl._fixes;
         return statInfo;
     }
 
@@ -530,6 +551,7 @@ class FlvPlayer {
 
     _checkAndResumeStuckPlayback(stalled) {
         let media = this._mediaElement;
+
         if (stalled || !this._receivedCanPlay || media.readyState < 2) {  // HAVE_CURRENT_DATA
             let buffered = media.buffered;
             if (buffered.length > 0 && media.currentTime < buffered.start(0)) {
@@ -598,6 +620,7 @@ class FlvPlayer {
     }
 
     _onvStalled(e) {
+        Log.v(this.TAG, 'video stalled');
         this._checkAndResumeStuckPlayback(true);
     }
 
@@ -605,6 +628,9 @@ class FlvPlayer {
         this._checkAndResumeStuckPlayback();
     }
 
+    _onvError(e) {
+        Log.v(this.TAG, JSON.stringify(e));
+    }
 }
 
 export default FlvPlayer;

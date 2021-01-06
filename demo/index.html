@@ -59,7 +59,12 @@
     <script>
         var checkBoxFields = ['isLive', 'withCredentials', 'hasAudio', 'hasVideo'];
         var streamURL, mediaSourceURL;
-
+		var timerFlag = false;
+		var hasSetTimer = false;
+        document.querySelector('video').addEventListener('error', (e) => {
+            console.error('video error: ', e);
+			console.error('videoElement error: ', document.querySelector('video').error);
+        })
         function flv_load() {
             console.log('isSupported: ' + flvjs.isSupported());
             if (mediaSourceURL.className === '') {
@@ -103,6 +108,28 @@
                 enableWorker: false,
                 lazyLoadMaxDuration: 3 * 60,
                 seekType: 'range',
+            });
+            player.on(flvjs.Events.ERROR, function (errorType, errorDetail, errorInfo) {
+				if ('MediaError' === errorType && !timerFlag && !hasSetTimer) {
+			
+					setTimeout(() => {timerFlag = true}, 10000);
+					hasSetTimer = true;
+				}
+				if ( timerFlag ) {
+					return;
+				}
+                console.error('errorType: ', errorType);
+                console.error('errorDetail: ', errorDetail);
+                console.error('errorInfo: ', errorInfo);
+            });
+            player.on(flvjs.Events.METADATA_ARRIVED, function (mediaData) {
+                console.log('METADATA_ARRIVED: ', mediaData);
+            });
+            player.on(flvjs.Events.MEDIA_INFO, function (mediaInfo) {
+                console.log('MEDIA_INFO: ', mediaInfo);
+            });
+            player.on(flvjs.Events.STATISTICS_INFO, function (info) {
+                console.warn('STATISTICS_INFO: ', info);
             });
             player.attachMediaElement(element);
             player.load();

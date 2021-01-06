@@ -17,6 +17,7 @@
  */
 
 import EventEmitter from 'events';
+import Log from '../utils/logger.js';
 import PlayerEvents from './player-events.js';
 import {createDefaultConfig} from '../config.js';
 import {InvalidArgumentException, IllegalStateException} from '../utils/exception.js';
@@ -42,7 +43,8 @@ class NativePlayer {
         }
 
         this.e = {
-            onvLoadedMetadata: this._onvLoadedMetadata.bind(this)
+            onvLoadedMetadata: this._onvLoadedMetadata.bind(this),
+            onvError: this._onvError.bind(this)
         };
 
         this._pendingSeekTime = null;
@@ -87,6 +89,8 @@ class NativePlayer {
     attachMediaElement(mediaElement) {
         this._mediaElement = mediaElement;
         mediaElement.addEventListener('loadedmetadata', this.e.onvLoadedMetadata);
+        mediaElement.addEventListener('error', this.e.onvError);
+
 
         if (this._pendingSeekTime != null) {
             try {
@@ -104,6 +108,7 @@ class NativePlayer {
             this._mediaElement.src = '';
             this._mediaElement.removeAttribute('src');
             this._mediaElement.removeEventListener('loadedmetadata', this.e.onvLoadedMetadata);
+            this._mediaElement.removeEventListener('error', this.e.onvError);
             this._mediaElement = null;
         }
         if (this._statisticsReporter != null) {
@@ -219,14 +224,19 @@ class NativePlayer {
         let hasQualityInfo = true;
         let decoded = 0;
         let dropped = 0;
+        let corrupted = 0;
 
         if (this._mediaElement.getVideoPlaybackQuality) {
             let quality = this._mediaElement.getVideoPlaybackQuality();
             decoded = quality.totalVideoFrames;
             dropped = quality.droppedVideoFrames;
+            corrupted = quality.corruptedVideoFrames;
         } else if (this._mediaElement.webkitDecodedFrameCount != undefined) {
             decoded = this._mediaElement.webkitDecodedFrameCount;
             dropped = this._mediaElement.webkitDroppedFrameCount;
+        } else if (this._mediaElement.mozDecodedFrames != undefined) {
+            decoded = this._mediaElement.mozDecodedFrames;
+            dropped = this._mediaElement.mozDecodedFrames - this._mediaElement.mozPaintedFrames;
         } else {
             hasQualityInfo = false;
         }
@@ -234,8 +244,21 @@ class NativePlayer {
         if (hasQualityInfo) {
             info.decodedFrames = decoded;
             info.droppedFrames = dropped;
+            info.corruptedFrames = corrupted;
         }
-        
+
+        let currentTime = this._mediaElement.currentTime;
+        let sb = this._mediaElement.buffered;     
+
+        if (currentTime) {
+            info.current = currentTime;
+        }
+        if (sb && sb.length > 0) {
+            info.sbStart = sb.start(0);
+            info.sbEnd = sb.end(sb.length - 1);
+        }
+        info.fixes = 0;
+
         return info;
     }
 
@@ -251,6 +274,9 @@ class NativePlayer {
         this._emitter.emit(PlayerEvents.STATISTICS_INFO, this.statisticsInfo);
     }
 
+    _onvError(e) {
+        Log.v(this.TAG, JSON.stringify(e));
+    }
 }
 
 export default NativePlayer;

@@ -29,10 +29,11 @@ export const defaultConfig = {
     deferLoadAfterSourceOpen: true,
 
     // autoCleanupSourceBuffer: default as false, leave unspecified
-    autoCleanupMaxBackwardDuration: 3 * 60,
-    autoCleanupMinBackwardDuration: 2 * 60,
+    autoCleanupMaxBackwardDuration: 3 * 20,
+    autoCleanupMinBackwardDuration: 1 * 20,
 
     statisticsInfoReportInterval: 600,
+    checkPlayInterval: 4000,
 
     fixAudioTimestampGap: true,
 

@@ -76,7 +76,17 @@ class MSEController {
             video: [],
             audio: []
         };
+
+        if (self.performance && self.performance.now) {
+            this._now = self.performance.now.bind(self.performance);
+        } else {
+            this._now = Date.now;
+        }    
+
         this._idrList = new IDRSampleList();
+        this._lastPaintedFrames = 0;
+        this._lastCheckpoint = 0;
+        this._fixes = 0;
     }
 
     destroy() {
@@ -100,6 +110,7 @@ class MSEController {
         if (this._mediaSource) {
             throw new IllegalStateException('MediaSource has been attached to an HTMLMediaElement!');
         }
+        Log.v(this.TAG, 'attachMediaElement');
         let ms = this._mediaSource = new window.MediaSource();
         ms.addEventListener('sourceopen', this.e.onSourceOpen);
         ms.addEventListener('sourceended', this.e.onSourceEnded);
@@ -112,6 +123,7 @@ class MSEController {
 
     detachMediaElement() {
         if (this._mediaSource) {
+            Log.v(this.TAG, 'detachMediaElement');
             let ms = this._mediaSource;
             for (let type in this._sourceBuffers) {
                 // pending segments should be discard
@@ -191,6 +203,7 @@ class MSEController {
                 firstInitSegment = true;
                 try {
                     let sb = this._sourceBuffers[is.type] = this._mediaSource.addSourceBuffer(mimeType);
+                    Log.v(this.TAG, 'Received firstInitSegment Segment, mimeType: ' + mimeType);
                     sb.addEventListener('error', this.e.onSourceBufferError);
                     sb.addEventListener('updateend', this.e.onSourceBufferUpdateEnd);
                 } catch (error) {
@@ -226,6 +239,7 @@ class MSEController {
         let ms = mediaSegment;
         this._pendingSegments[ms.type].push(ms);
 
+
         if (this._config.autoCleanupSourceBuffer && this._needCleanupSourceBuffer()) {
             this._doCleanupSourceBuffer();
         }
@@ -233,6 +247,15 @@ class MSEController {
         let sb = this._sourceBuffers[ms.type];
         if (sb && !sb.updating && !this._hasPendingRemoveRanges()) {
             this._doAppendSegments();
+        }
+
+        if (this._lastCheckpoint === 0) {
+            this._lastCheckpoint = this._now();
+        }
+
+        if (this._now() - this._lastCheckpoint > this._config.checkPlayInterval) {
+            this._checkPlaystate(true);   
+            this._lastCheckpoint = this._now();       
         }
     }
 
@@ -297,6 +320,7 @@ class MSEController {
     endOfStream() {
         let ms = this._mediaSource;
         let sb = this._sourceBuffers;
+        Log.v(this.TAG, 'endOfStream');
         if (!ms || ms.readyState !== 'open') {
             if (ms && ms.readyState === 'closed' && this._hasPendingSegments()) {
                 // If MediaSource hasn't turned into open state, and there're pending segments
@@ -346,7 +370,7 @@ class MSEController {
 
     _doCleanupSourceBuffer() {
         let currentTime = this._mediaElement.currentTime;
-
+        
         for (let type in this._sourceBuffers) {
             let sb = this._sourceBuffers[type];
             if (sb) {
@@ -378,6 +402,7 @@ class MSEController {
 
     _updateMediaSourceDuration() {
         let sb = this._sourceBuffers;
+        Log.v(this.TAG, '_updateMediaSourceDuration');
         if (this._mediaElement.readyState === 0 || this._mediaSource.readyState !== 'open') {
             return;
         }
@@ -418,7 +443,7 @@ class MSEController {
             if (!this._sourceBuffers[type] || this._sourceBuffers[type].updating) {
                 continue;
             }
-
+            
             if (pendingSegments[type].length > 0) {
                 let segment = pendingSegments[type].shift();
 
@@ -438,6 +463,7 @@ class MSEController {
 
                 if (!segment.data || segment.data.byteLength === 0) {
                     // Ignore empty buffer
+                    Log.v(this.TAG, 'Ignore empty buffer: ' + type);    
                     continue;
                 }
 
@@ -447,7 +473,10 @@ class MSEController {
                     if (type === 'video' && segment.hasOwnProperty('info')) {
                         this._idrList.appendArray(segment.info.syncPoints);
                     }
+
                 } catch (error) {
+                    Log.v(this.TAG, 'append error');
+                    console.log(error);
                     this._pendingSegments[type].unshift(segment);
                     if (error.code === 22) {  // QuotaExceededError
                         /* Notice that FireFox may not throw QuotaExceededError if SourceBuffer is full
@@ -461,6 +490,7 @@ class MSEController {
 
                         // report buffer full, abort network IO
                         if (!this._isBufferFull) {
+                            Log.v(this.TAG, '_isBufferFull');
                             this._emitter.emit(MSEEvents.BUFFER_FULL);
                         }
                         this._isBufferFull = true;
@@ -534,6 +564,56 @@ class MSEController {
         // this error might not always be fatal, just ignore it
     }
 
+    _checkPlaystate(bfix) {
+        // some browsers will pause the player once it's running in the background
+        // need to update the player's currentTime in order to clean buffer in time
+        if (!this._mediaElement) {
+            return;
+        }
+
+        let painted = 0;
+
+        if (this._mediaElement.getVideoPlaybackQuality) {
+            let quality = this._mediaElement.getVideoPlaybackQuality();
+            painted = quality.totalVideoFrames - quality.droppedVideoFrames;
+            
+        } else if (this._mediaElement.webkitDecodedFrameCount != undefined) {
+            painted = this._mediaElement.webkitDecodedFrameCount - this._mediaElement.webkitDroppedFrameCount;
+            
+        } else if (this._mediaElement.mozPaintedFrames != undefined) {
+            painted = this._mediaElement.mozPaintedFrames;
+        } else {
+            return;
+        }
+
+        if (this._lastPaintedFrames === 0) {
+            this._lastPaintedFrames = painted;
+            return;
+        }
+
+        if (bfix && this._mediaElement.buffered && this._mediaElement.buffered.length > 0) {
+            let index = this._mediaElement.buffered.length - 1;
+            let startTime = this._mediaElement.buffered.start(0);
+            let endTime = this._mediaElement.buffered.end(index);
+            let currentTime = this._mediaElement.currentTime;
+            if (painted <= this._lastPaintedFrames || currentTime < endTime - 20) {  // chase frame once freezed or delay too much (player pauses)
+                if ((startTime + endTime) / 2 > (endTime - 1.8)) {
+                    this._mediaElement.currentTime = (startTime + endTime) / 2;
+                } else {
+                    this._mediaElement.currentTime = endTime - 1.8;
+                }
+                this._mediaElement.play();  // fix: safari won't autoplay once freezed.
+                if (painted <= this._lastPaintedFrames) {
+                    Log.w(this.TAG, `play freeze at: ${this._lastPaintedFrames} ${painted} fix: ${bfix} resetTime: ${this._mediaElement.currentTime} start: ${startTime} end: ${endTime}`);
+                } else {
+                    Log.w(this.TAG, `delay ${endTime - currentTime}s, chase frame - resetTime: ${this._mediaElement.currentTime}`);
+                }
+                this._fixes ++;
+            }
+        }
+
+        this._lastPaintedFrames = painted;
+    }
 }
 
 export default MSEController;
